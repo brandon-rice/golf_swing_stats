@@ -1,0 +1,24 @@
+.venv/
+venv/
+__pycache__/
+*.pyc
+*.pyo
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+
+.env
+.env.local
+.streamlit/secrets.toml
+
+# Generated analysis artifacts (contain personal shot data; rebuilt by src.analyze)
+/reports/*.txt
+/reports/*.html
+
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+
+# Per-machine Claude Code settings
+.claude/settings.local.json

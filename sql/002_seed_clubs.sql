@@ -1,0 +1,23 @@
+INSERT INTO clubs (club_code, club_name, club_type, sort_order) VALUES
+    ('D',   'Driver',          'driver', 10),
+    ('3W',  '3 Wood',          'wood',   20),
+    ('5W',  '5 Wood',          'wood',   30),
+    ('7W',  '7 Wood',          'wood',   35),
+    ('2H',  '2 Hybrid',        'hybrid', 40),
+    ('3H',  '3 Hybrid',        'hybrid', 45),
+    ('4H',  '4 Hybrid',        'hybrid', 50),
+    ('5H',  '5 Hybrid',        'hybrid', 55),
+    ('2I',  '2 Iron',          'iron',   60),
+    ('3I',  '3 Iron',          'iron',   65),
+    ('4I',  '4 Iron',          'iron',   70),
+    ('5I',  '5 Iron',          'iron',   75),
+    ('6I',  '6 Iron',          'iron',   80),
+    ('7I',  '7 Iron',          'iron',   85),
+    ('8I',  '8 Iron',          'iron',   90),
+    ('9I',  '9 Iron',          'iron',   95),
+    ('PW',  'Pitching Wedge',  'wedge', 100),
+    ('GW',  'Gap Wedge',       'wedge', 110),
+    ('SW',  'Sand Wedge',      'wedge', 130),
+    ('LW',  'Lob Wedge',       'wedge', 120),
+    ('P',   'Putter',          'putter', 200)
+ON CONFLICT (club_code) DO NOTHING;

@@ -1,0 +1,9 @@
+streamlit>=1.30
+pandas>=2.1
+numpy>=1.26
+psycopg2-binary>=2.9
+sqlalchemy>=2.0
+python-dotenv>=1.0
+plotly>=5.18
+scipy>=1.11
+pytest>=8.0
