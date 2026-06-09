@@ -17,6 +17,8 @@ SkyTrak ShotsHistory CSV  →  parse  →  local Postgres  →  analyze (stats +
   re-running is safe; each file lands in its own transaction.
 - **Analyze** (`src/analyze.py`) — per-club mean/std-dev report plus an interactive Plotly
   dispersion chart with 1σ/2σ ellipses.
+- **Publish** (`src/publish.py`) — copies local sessions to a Neon (cloud) Postgres database,
+  idempotently, so the data can be reached from anywhere.
 
 ## Prerequisites
 
@@ -101,6 +103,32 @@ Outputs (under `reports/`, git-ignored as they contain personal data):
 Useful flags: `--out PATH`, `--chart-out PATH`, `--no-ellipses`. Run
 `python -m src.analyze -h` for the full list.
 
+## Publishing to Neon (cloud)
+
+Mirror your local data up to a [Neon](https://neon.tech/) Postgres database so it can be
+reached from anywhere. Set `NEON_DB_URL` in `.env` first (see `.env.example`), then:
+
+```powershell
+# First time: create the schema + seed the club list on Neon
+python -m src.publish --init
+
+# Publish every local session not yet on Neon:
+python -m src.publish
+
+# Re-publish everything, even already-published sessions:
+python -m src.publish --all
+```
+
+Publishing is **idempotent** — it only sends sessions whose local `published_at` is null, and
+a session already on Neon (matched by `file_hash`) is skipped, not duplicated. Each session
+is copied in its own transaction, and the local row is stamped `published_at` only after Neon
+accepts it. Re-running is always safe. Typical flow after a range session:
+
+```powershell
+python -m src.ingest      # load new CSVs into local Postgres
+python -m src.publish     # push the new sessions up to Neon
+```
+
 ## Running tests
 
 ```powershell
@@ -116,6 +144,7 @@ src/
   parser.py    # SkyTrak ShotsHistory CSV parser
   ingest.py    # CSV → Postgres loader (CLI)
   analyze.py   # per-club stats + dispersion chart (CLI)
+  publish.py   # local → Neon cloud publish (CLI)
 sql/
   001_schema.sql       # clubs / sessions / shots tables
   002_seed_clubs.sql   # canonical club list
@@ -126,5 +155,4 @@ reports/       # generated analysis output (git-ignored)
 
 ## Roadmap
 
-- Local → Neon cloud publish flow (schema already supports it via `sessions.published_at`).
-- Streamlit dashboard in `app/` for interactive exploration.
+- Streamlit dashboard in `app/` for interactive exploration (reading from Neon).
