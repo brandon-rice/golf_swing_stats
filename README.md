@@ -6,7 +6,7 @@ per-club descriptive stats and a shot-dispersion chart.
 
 ```
 SkyTrak ShotsHistory CSV  →  parse  →  local Postgres  →  analyze (stats + chart)
-                                              └─→ (planned) Neon cloud → Streamlit dashboard
+                                              └─→ Neon cloud  →  Streamlit dashboard
 ```
 
 ## Features
@@ -19,6 +19,9 @@ SkyTrak ShotsHistory CSV  →  parse  →  local Postgres  →  analyze (stats +
   dispersion chart with 1σ/2σ ellipses.
 - **Publish** (`src/publish.py`) — copies local sessions to a Neon (cloud) Postgres database,
   idempotently, so the data can be reached from anywhere.
+- **Dashboard** (`app/`) — a multipage Streamlit app (Overview, Club Stats, Sessions) that
+  reads from either the local or the Neon database and renders the same dispersion chart and
+  per-club stats interactively, with filters.
 
 ## Prerequisites
 
@@ -129,6 +132,32 @@ python -m src.ingest      # load new CSVs into local Postgres
 python -m src.publish     # push the new sessions up to Neon
 ```
 
+## Dashboard
+
+Launch the Streamlit dashboard from the project root:
+
+```powershell
+streamlit run app/Home.py
+```
+
+It opens at <http://localhost:8501> with three pages:
+
+- **Overview** — KPI summary plus the interactive dispersion chart (toggle total/carry
+  distance and the 1σ/2σ ellipses), filterable by session and club.
+- **Club Stats** — per-club averages table, a single-club mean/std detail with side tendency,
+  and the full text report as a download.
+- **Sessions** — the list of ingested sessions (with a "published to Neon" flag) and a
+  per-club trend of any metric across sessions over time.
+
+A **Data source** picker in the sidebar switches between the local Postgres and the Neon
+cloud mirror (only targets that are configured are offered). The app reuses the same
+connection settings as the CLI — local `DB_*` keys plus `NEON_DB_URL`.
+
+When deploying to [Streamlit Community Cloud](https://streamlit.io/cloud), the local database
+isn't reachable, so configure only `NEON_DB_URL` (and `DB_SCHEMA` if non-default) in the app's
+**Secrets** — see `.streamlit/secrets.toml.example`. `src/config.py` reads Streamlit secrets
+automatically when running under Streamlit, falling back to `.env` locally.
+
 ## Running tests
 
 ```powershell
@@ -145,14 +174,19 @@ src/
   ingest.py    # CSV → Postgres loader (CLI)
   analyze.py   # per-club stats + dispersion chart (CLI)
   publish.py   # local → Neon cloud publish (CLI)
+app/
+  Home.py              # dashboard entry — Overview page (KPIs + dispersion)
+  data.py              # shared data access (source picker, cached loaders)
+  pages/
+    1_Club_Stats.py    # per-club averages, detail, report download
+    2_Sessions.py      # session list + per-club trends
 sql/
   001_schema.sql       # clubs / sessions / shots tables
   002_seed_clubs.sql   # canonical club list
 tests/         # parser tests + fixtures
-app/           # Streamlit dashboard (planned)
 reports/       # generated analysis output (git-ignored)
 ```
 
 ## Roadmap
 
-- Streamlit dashboard in `app/` for interactive exploration (reading from Neon).
+- Deploy the dashboard to Streamlit Community Cloud, reading from Neon.
