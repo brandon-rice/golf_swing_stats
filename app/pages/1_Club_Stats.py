@@ -25,21 +25,29 @@ if view.empty:
 clubs = data.club_order(view)
 names = dict(zip(view["club_code"], view["club_name"]))
 
-# --- Summary: mean of each metric per club ---------------------------------
+# --- Summary: every stat per club ------------------------------------------
 st.subheader("Averages by club")
+st.dataframe(data.club_averages(view, extended=True), use_container_width=True)
+st.caption(
+    "Distances are means; Total σ / Offline σ are sample std devs and 67% / 95% "
+    "are the mean ± 1σ / ± 2σ total-yardage bands. Detail view below has every "
+    "metric's std dev."
+)
 
-rows = []
-for code in clubs:
-    g = view[view["club_code"] == code]
-    row: dict[str, object] = {"Club": code, "n": len(g)}
-    for col, label in data.METRICS:
-        series = g[col].dropna()
-        row[label] = round(series.mean(), 2) if not series.empty else None
-    rows.append(row)
-
-summary = pd.DataFrame(rows).set_index("Club")
-st.dataframe(summary, use_container_width=True)
-st.caption("Values are means. Use the detail view below for standard deviations.")
+# --- Dispersion chart ------------------------------------------------------
+st.subheader("Shot dispersion")
+opt1, opt2, _ = st.columns([1, 1, 4])
+distance = opt1.radio("Downrange axis", ("total", "carry"), horizontal=True)
+ellipses = opt2.toggle("1σ / 2σ ellipses", value=True)
+st.plotly_chart(
+    data.build_chart(
+        view,
+        distance_col=f"{distance}_yd",
+        clubs=clubs or None,
+        ellipses=ellipses,
+    ),
+    use_container_width=True,
+)
 
 # --- Single-club detail ----------------------------------------------------
 st.subheader("Club detail")
@@ -65,12 +73,11 @@ with d1:
 with d2:
     st.markdown("**Side tendency**")
     st.write(data.side_summary(g["offline_yd"]))
-    st.markdown("**Carry distribution**")
-    carry = g["carry_yd"].dropna()
-    if not carry.empty:
-        st.bar_chart(carry.value_counts(bins=10).sort_index())
-    else:
-        st.write("no carry data")
+
+# --- Session-to-session trend (total distance) -----------------------------
+st.markdown("**Total distance trend**")
+st.plotly_chart(data.build_session_trend(g), use_container_width=True)
+st.caption("Each point is a session's mean total yardage; error bars are that session's std dev.")
 
 # --- Full text report download --------------------------------------------
 report = data.build_report(view)

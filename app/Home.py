@@ -32,8 +32,17 @@ c1, c2, c3, c4 = st.columns(4)
 c1.metric("Shots", f"{len(view):,}")
 c2.metric("Sessions", view["session_id"].nunique())
 c3.metric("Clubs", view["club_code"].nunique())
-span = f"{view['session_ts'].min():%Y-%m-%d} → {view['session_ts'].max():%Y-%m-%d}"
-c4.metric("Date range", span)
+# Render the date range as normal-size text — the big st.metric value font
+# clips the full span.
+c4.markdown(
+    f"**Date range**  \n{view['session_ts'].min():%b %d %Y} → "
+    f"{view['session_ts'].max():%b %d %Y}"
+)
+
+# --- Averages by club ------------------------------------------------------
+st.subheader("Averages by club")
+st.dataframe(data.club_averages(view), use_container_width=True)
+st.caption("Distances are means; 67% / 95% are mean ± 1σ / ± 2σ of total yardage.")
 
 # --- Dispersion chart ------------------------------------------------------
 opt1, opt2, _ = st.columns([1, 1, 4])

@@ -263,6 +263,52 @@ def build_chart(
     return fig
 
 
+def build_session_trend(
+    df_club: pd.DataFrame,
+    distance_col: str = "total_yd",
+    label: str = "Total (yd)",
+) -> go.Figure:
+    """Per-session mean of ``distance_col`` for one club over time.
+
+    Each point is a session's mean distance; the error bars are that session's
+    sample standard deviation (omitted for single-shot sessions). Useful for
+    spotting whether a club's distance is trending up/down and tightening.
+    """
+    y = pd.to_numeric(df_club[distance_col], errors="coerce")
+    g = (
+        pd.DataFrame({"session_ts": df_club["session_ts"], "y": y})
+        .dropna(subset=["y"])
+        .groupby("session_ts")["y"]
+        .agg(["mean", "std"])
+        .reset_index()
+        .sort_values("session_ts")
+    )
+
+    fig = go.Figure()
+    if not g.empty:
+        fig.add_trace(
+            go.Scatter(
+                x=g["session_ts"],
+                y=g["mean"],
+                mode="lines+markers",
+                error_y=dict(type="data", array=g["std"].fillna(0.0), visible=True),
+                marker=dict(size=9),
+                line=dict(width=2),
+                hovertemplate=(
+                    "%{x|%Y-%m-%d}<br>mean %{y:.1f} yd"
+                    "<br>σ %{error_y.array:.1f} yd<extra></extra>"
+                ),
+            )
+        )
+    fig.update_layout(
+        title=f"{label} by session",
+        xaxis_title="Session",
+        yaxis_title=label,
+        template="plotly_white",
+    )
+    return fig
+
+
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(description="Per-club descriptive stats to a text file.")
     ap.add_argument("--out", default=str(DEFAULT_OUT), help=f"Text report (default: {DEFAULT_OUT}).")

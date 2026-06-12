@@ -2,6 +2,7 @@
 trends per club across sessions over time."""
 from __future__ import annotations
 
+import pandas as pd
 import streamlit as st
 
 import data
@@ -15,6 +16,15 @@ sessions = data.load_sessions(source)
 if sessions.empty:
     st.info("No sessions found in this database yet.")
     st.stop()
+
+# --- KPI row ----------------------------------------------------------------
+k1, k2, k3 = st.columns(3)
+k1.metric("Sessions", len(sessions))
+k2.metric("Total shots", int(sessions["shots"].sum()))
+days_since = (
+    pd.Timestamp.now().normalize() - sessions["session_ts"].max().normalize()
+).days
+k3.metric("Days since last session", days_since)
 
 # --- Session list ----------------------------------------------------------
 st.subheader("Ingested sessions")
@@ -30,6 +40,14 @@ st.dataframe(
         "session_ts": st.column_config.DatetimeColumn("When", format="YYYY-MM-DD HH:mm"),
         "published": st.column_config.CheckboxColumn("On Neon"),
     },
+)
+
+# --- Shots per session ------------------------------------------------------
+st.subheader("Shots per session")
+st.bar_chart(
+    sessions.set_index("session_ts")["shots"].sort_index(),
+    y_label="Shots",
+    x_label="Session",
 )
 
 # --- Trend over sessions ---------------------------------------------------
