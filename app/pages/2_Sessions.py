@@ -44,11 +44,7 @@ st.dataframe(
 
 # --- Shots per session ------------------------------------------------------
 st.subheader("Shots per session")
-st.bar_chart(
-    sessions.set_index("session_ts")["shots"].sort_index(),
-    y_label="Shots",
-    x_label="Session",
-)
+st.plotly_chart(data.build_shots_per_session(sessions), use_container_width=True)
 
 # --- Trend over sessions ---------------------------------------------------
 st.subheader("Trend across sessions")
@@ -78,7 +74,7 @@ trend = (
 )
 trend = trend.reindex(columns=picked)  # stable, sorted club order
 
-st.line_chart(trend, y_label=choice, x_label="Session")
+st.plotly_chart(data.build_clubs_trend(trend, label=choice), use_container_width=True)
 st.caption(
     f"Per-session mean **{choice}** by club. Each point is one session's "
     "average for that club; gaps mean the club wasn't hit that session."

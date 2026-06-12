@@ -26,6 +26,8 @@ from src import analyze, config, db  # noqa: E402
 build_chart = analyze.build_chart
 build_report = analyze.build_report
 build_session_trend = analyze.build_session_trend
+build_shots_per_session = analyze.build_shots_per_session
+build_clubs_trend = analyze.build_clubs_trend
 METRICS = analyze.METRICS
 DECIMALS = analyze.DECIMALS
 side_summary = analyze._side_summary

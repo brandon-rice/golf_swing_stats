@@ -20,6 +20,10 @@ from plotly.colors import qualitative
 
 from . import config, db
 
+# Base font size for the Plotly figures so chart text reads well on the
+# dashboard (axis titles/ticks bump up from this).
+CHART_FONT_SIZE = 15
+
 # (column, label) in report order. The first 8 are the user's preferred order;
 # the remainder follow in any order. Decimals chosen per metric below.
 METRICS: list[tuple[str, str]] = [
@@ -256,6 +260,7 @@ def build_chart(
         yaxis_title=f"{distance_col.replace('_yd', '').title()} distance (yd)",
         template="plotly_white",
         legend_title="Club",
+        font=dict(size=CHART_FONT_SIZE),
     )
     fig.update_xaxes(range=[-(max_abs_x + pad), max_abs_x + pad], zeroline=False)
     # Lock equal aspect so lateral spread isn't visually exaggerated.
@@ -301,11 +306,71 @@ def build_session_trend(
             )
         )
     fig.update_layout(
-        title=f"{label} by session",
-        xaxis_title="Session",
+        title=f"{label} by date",
+        xaxis_title="Date",
         yaxis_title=label,
         template="plotly_white",
+        font=dict(size=CHART_FONT_SIZE),
     )
+    # Show calendar dates on the x-axis rather than date-and-time.
+    fig.update_xaxes(type="date", tickformat="%Y-%m-%d")
+    return fig
+
+
+def build_shots_per_session(sessions: pd.DataFrame) -> go.Figure:
+    """Bar chart of shot count per session, x-axis as calendar dates.
+
+    ``sessions`` is the one-row-per-session frame (``session_ts`` + ``shots``).
+    """
+    g = sessions[["session_ts", "shots"]].sort_values("session_ts")
+    fig = go.Figure(
+        go.Bar(
+            x=g["session_ts"],
+            y=g["shots"],
+            hovertemplate="%{x|%Y-%m-%d}<br>%{y} shots<extra></extra>",
+        )
+    )
+    fig.update_layout(
+        xaxis_title="Date",
+        yaxis_title="Shots",
+        template="plotly_white",
+        font=dict(size=CHART_FONT_SIZE),
+    )
+    fig.update_xaxes(type="date", tickformat="%Y-%m-%d")
+    return fig
+
+
+def build_clubs_trend(trend: pd.DataFrame, label: str = "value") -> go.Figure:
+    """Line-per-club trend over time, x-axis as calendar dates.
+
+    ``trend`` is a wide frame indexed by ``session_ts`` with one column per club
+    code (the value is that session's mean of the chosen metric). Missing values
+    are gaps in the line (the club wasn't hit that session).
+    """
+    palette = qualitative.Plotly
+    fig = go.Figure()
+    for i, code in enumerate(trend.columns):
+        series = trend[code]
+        fig.add_trace(
+            go.Scatter(
+                x=trend.index,
+                y=series,
+                mode="lines+markers",
+                name=str(code),
+                connectgaps=False,
+                marker=dict(size=8, color=palette[i % len(palette)]),
+                line=dict(width=2, color=palette[i % len(palette)]),
+                hovertemplate=f"{code}<br>%{{x|%Y-%m-%d}}<br>%{{y:.1f}}<extra></extra>",
+            )
+        )
+    fig.update_layout(
+        xaxis_title="Date",
+        yaxis_title=label,
+        template="plotly_white",
+        legend_title="Club",
+        font=dict(size=CHART_FONT_SIZE),
+    )
+    fig.update_xaxes(type="date", tickformat="%Y-%m-%d")
     return fig
 
 
