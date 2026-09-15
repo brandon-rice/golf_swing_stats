@@ -1,20 +1,25 @@
 # golf_swing_stats
 
 Personal pipeline for tracking and analyzing [SkyTrak](https://skytrak.golf/) launch-monitor
-data. It parses SkyTrak **ShotsHistory** CSV exports, loads them into Postgres, and produces
+data. It parses SkyTrak shot-history CSV exports, loads them into Postgres, and produces
 per-club descriptive stats and a shot-dispersion chart.
 
 ```
-SkyTrak ShotsHistory CSV  →  parse  →  local Postgres  →  analyze (stats + chart)
+one or more export folders  →  parse  →  local Postgres  →  analyze (stats + chart)
                                               └─→ Neon cloud  →  Streamlit dashboard
 ```
 
 ## Features
 
-- **Parser** (`src/parser.py`) — reads SkyTrak multi-club exports, tolerating both short club
-  codes (`PW`, `7I`) and full names (`7 IRON`, `7 WOOD`), normalizing them to canonical codes.
-- **Ingest** (`src/ingest.py`) — loads files into Postgres, deduplicating by file hash so
-  re-running is safe; each file lands in its own transaction.
+- **Parser** (`src/parser.py`) — reads SkyTrak multi-club exports in **both export
+  generations** (see below), tolerating short club codes (`PW`, `7I`), full names
+  (`7 IRON`, `7 WOOD`), and wedge loft labels (`56°`, `60`), normalizing them all to
+  canonical codes so one club never splits across two. Metric columns are located by
+  the file's own two-row column header, not by position, so a column SkyTrak adds, drops, or
+  renames doesn't silently shift every reading after it.
+- **Ingest** (`src/ingest.py`) — scans **every configured data folder** in one pass and loads
+  the files into Postgres, deduplicating by file hash so re-running is safe; each file lands
+  in its own transaction.
 - **Analyze** (`src/analyze.py`) — per-club mean/std-dev report plus an interactive Plotly
   dispersion chart with 1σ/2σ ellipses.
 - **Publish** (`src/publish.py`) — copies local sessions to a Neon (cloud) Postgres database,
@@ -53,7 +58,9 @@ Edit `.env` (see `.env.example` for all keys):
 - `DB_HOST` / `DB_PORT` / `DB_NAME` / `DB_USER` / `DB_PASSWORD` — local Postgres connection
   (or set a single `LOCAL_DB_URL`).
 - `DB_SCHEMA` — schema holding the golf tables (default `golf_swing_stats`).
-- `SWING_DATA_DIR` — folder where your SkyTrak CSV exports live.
+- `SWING_DATA_DIRS` — one or more folders where your SkyTrak CSV exports live, separated by
+  `;` on Windows (`:` on macOS/Linux). `SWING_DATA_DIR` (singular) still works for a single
+  folder, and is merged in if both are set.
 
 Create the schema, tables, and seed the club list (idempotent — safe to re-run):
 
@@ -61,23 +68,48 @@ Create the schema, tables, and seed the club list (idempotent — safe to re-run
 python -m src.ingest --init
 ```
 
+## Supported export formats
+
+SkyTrak changed its export part-way through, and the two generations land in different
+folders with different filenames and a different column layout. Both are supported, and each
+file is identified by its *contents*, never by its filename or folder — so the two can even
+sit in the same folder.
+
+| | Legacy | Current |
+|---|---|---|
+| Filename | `Export_ShotsHistory_06092026_134151.csv` | `activity-1788786050.csv` |
+| Session header | `PRACTICE: 6/9/2026 1:41 PM` | `PRACTICE: 07/09/2026 • 01:40 PM`, and the label may be qualified (`PRACTICE GREENS:`) |
+| Cells | unquoted, padded to the column count | quoted, ragged rows |
+| Metric columns | 19 | 20 — adds `FTP` (face-to-path) before `FTT` |
+| Score column | `SHOT SCORE`, or `EXPECTED DIST.` in some files | `SHOT SCORE` |
+
+`FTP` is stored in `shots.face_to_path_deg` and is `NULL` for legacy files, which never
+recorded it.
+
 ## Loading data
 
-Export a session from SkyTrak as a ShotsHistory CSV and drop it in your `SWING_DATA_DIR`.
+Export a session from SkyTrak and drop the CSV in any folder listed in `SWING_DATA_DIRS`.
 
 ```powershell
-# Ingest every CSV in SWING_DATA_DIR (already-loaded files are skipped by hash):
+# Scan every configured folder (already-loaded files are skipped by hash):
 python -m src.ingest
 
-# ...or ingest one specific file:
-python -m src.ingest "C:/path/to/Export_ShotsHistory_06092026_134151.csv"
+# See which folders and files would be scanned, without touching the database:
+python -m src.ingest --list
 
-# Apply schema/seed first, then ingest, in one go:
+# ...or ingest specific folders and/or files, overriding the configured list:
+python -m src.ingest "C:/Users/me/my_docs/swing_stats"
+python -m src.ingest "C:/path/to/activity-1788786050.csv"
+
+# Apply schema/migrations/seed first, then ingest, in one go:
 python -m src.ingest --init
 ```
 
-Each file reports `OK` (inserted), `SKIP` (already imported), or `ERROR`. Re-running is
-always safe; duplicates are detected by the file's SHA-256 hash, not its name.
+Output is grouped by folder, and each file reports `OK` (inserted), `SKIP` (already
+imported), or `ERROR`. Re-running is always safe; duplicates are detected by the file's
+SHA-256 hash, not its name — so the same session exported into both folders loads once. A
+folder that isn't there (an un-synced OneDrive, an unplugged drive) is reported as a single
+error and the remaining folders are still scanned.
 
 ## Analyzing data
 
@@ -112,7 +144,8 @@ Mirror your local data up to a [Neon](https://neon.tech/) Postgres database so i
 reached from anywhere. Set `NEON_DB_URL` in `.env` first (see `.env.example`), then:
 
 ```powershell
-# First time: create the schema + seed the club list on Neon
+# First time (and after any new sql/ migration): create/update the schema
+# and seed the club list on Neon
 python -m src.publish --init
 
 # Publish every local session not yet on Neon:
@@ -181,8 +214,9 @@ app/
     1_Club_Stats.py    # per-club averages, detail, report download
     2_Sessions.py      # session list + per-club trends
 sql/
-  001_schema.sql       # clubs / sessions / shots tables
-  002_seed_clubs.sql   # canonical club list
+  001_schema.sql              # clubs / sessions / shots tables
+  002_seed_clubs.sql          # canonical club list
+  003_add_face_to_path.sql    # FTP column added by the current export format
 tests/         # parser tests + fixtures
 reports/       # generated analysis output (git-ignored)
 ```

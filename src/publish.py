@@ -27,7 +27,12 @@ from sqlalchemy.engine import Engine
 from . import config, db
 
 SQL_DIR = config.PROJECT_ROOT / "sql"
-SCHEMA_FILES = ("001_schema.sql", "002_seed_clubs.sql")
+SCHEMA_FILES = (
+    "001_schema.sql",
+    "002_seed_clubs.sql",
+    "003_add_face_to_path.sql",
+    "004_merge_loft_labeled_wedges.sql",
+)
 
 
 @dataclasses.dataclass

@@ -1,17 +1,31 @@
-"""Parse SkyTrak ShotsHistory CSV exports.
+"""Parse SkyTrak shot-history CSV exports.
 
-Format notes:
-- Lines 1-3 are a free-form header: `PRACTICE: <date> <time>`, `PLAYER: <name>`, blank.
-- Then a two-row column header (names, units).
+Two export generations are supported; both are detected from the file itself,
+never from the filename or its folder.
+
+*Legacy* (``Export_ShotsHistory_*.csv``) — unquoted, every row padded to the
+column count, header ``PRACTICE: 6/8/2026 12:32 PM``, 19 metric columns.
+
+*Current* (``activity-*.csv``) — quoted, ragged rows, header
+``PRACTICE: 07/09/2026 • 01:40 PM`` (a bullet between date and time, and the
+label may be qualified, e.g. ``PRACTICE GREENS:``), and one extra metric column
+(``FTP``, face-to-path) wedged in before ``FTT``.
+
+Shared structure:
+- A free-form header: `PRACTICE...: <date> <time>`, `PLAYER: <name>`, blank.
+- Then a two-row column header (names, then units). Metric columns are located
+  by that header pair rather than by position, so an inserted, dropped, or
+  renamed column shifts nothing.
 - Each club's shots are introduced by a delimiter row whose first cell is the club
   code and remaining cells are blank, followed by N shot rows (col 0 = integer),
   then a row whose first cell is `AVG` (to skip), then a blank or another club.
 - A trailing `NOTES` row may precede free-form note text.
-- Files may contain one or many club blocks; we never trust the filename.
+- Files may contain one or many club blocks.
 """
 from __future__ import annotations
 
 import csv
+import dataclasses
 import hashlib
 import re
 from dataclasses import dataclass, field
@@ -22,8 +36,11 @@ from pathlib import Path
 SHOT_HEADER_TOKEN = "SHOT"
 AVG_TOKEN = "AVG"
 NOTES_TOKEN = "NOTES"
-PRACTICE_TOKEN = "PRACTICE:"
 PLAYER_TOKEN = "PLAYER:"
+
+# The session line is `PRACTICE: <when>`, but newer exports qualify the label
+# ("PRACTICE GREENS: ..."), so match the word plus anything up to the colon.
+PRACTICE_RE = re.compile(r"PRACTICE[^:,]*:")
 
 # A canonical club code matches the seeded `clubs.club_code` values: 1-3
 # uppercase letters/digits (e.g. D, 7I, GW, 3W).
@@ -43,16 +60,32 @@ _CLUB_NAME_TO_CODE = {
 _NUMBERED_CLUB_SUFFIX = {"IRON": "I", "WOOD": "W", "HYBRID": "H"}
 _NUMBERED_CLUB_RE = re.compile(r"^(\d{1,2})\s+(IRON|WOOD|HYBRID)$")
 
+# SkyTrak sometimes labels a wedge by its loft ("56°") rather than a code, which
+# would otherwise auto-register as a club of its own. Lofts are mapped to the
+# wedge that carries them in this bag: the 60 is the lob wedge (chip club), the
+# 56 the sand wedge. No canonical club code is purely numeric, so the degree
+# sign is optional and a bare number is still unambiguously a loft.
+_LOFT_TO_CODE = {
+    46: "PW", 47: "PW", 48: "PW",
+    50: "GW", 52: "GW",
+    54: "SW", 56: "SW",
+    58: "LW", 60: "LW",
+}
+_LOFT_RE = re.compile(r"^(\d{2})\s*(?:°|DEG(?:REES?)?)?$")
+
 
 def _normalize_club_code(label: str) -> str:
     """Map a club delimiter label to the canonical seeded ``club_code``.
 
-    Accepts codes already in canonical form (``PW``, ``7W``, ``GW``) and full
-    SkyTrak names (``7 IRON``, ``7 WOOD``, ``PITCHING WEDGE``). Unrecognized
-    labels are returned cleaned-but-as-is, so ingest auto-registers them rather
-    than hard-failing.
+    Accepts codes already in canonical form (``PW``, ``7W``, ``GW``), full
+    SkyTrak names (``7 IRON``, ``7 WOOD``, ``PITCHING WEDGE``), and wedge loft
+    labels (``56°``, ``60``). Unrecognized labels are returned cleaned-but-as-is,
+    so ingest auto-registers them rather than hard-failing.
     """
     s = " ".join(label.split()).upper()  # collapse internal/trailing whitespace
+    loft = _LOFT_RE.match(s)
+    if loft and int(loft.group(1)) in _LOFT_TO_CODE:
+        return _LOFT_TO_CODE[int(loft.group(1))]
     if CLUB_CODE_RE.match(s):
         return s
     if s in _CLUB_NAME_TO_CODE:
@@ -68,6 +101,53 @@ _DATE_FORMATS = (
     "%m/%d/%Y %H:%M",
     "%m/%d/%Y",
 )
+
+# Metric columns are located by their (name, unit) pair from the two header
+# rows, not by position. `SIDE` appears twice — spin and angle — and is told
+# apart only by its unit, which is why the unit row is part of the key.
+_COLUMN_MAP: dict[tuple[str, str], str] = {
+    ("HAND", "L/R"): "hand",
+    ("SHOT SCORE", "SCORE"): "shot_score",
+    # Some legacy exports relabel the very same score column as a distance.
+    ("EXPECTED DIST.", "SCORE"): "shot_score",
+    ("BALL SPEED", "MPH"): "ball_speed_mph",
+    ("LAUNCH", "DEG"): "launch_deg",
+    ("BACK", "RPM"): "back_spin_rpm",
+    ("SIDE", "RPM"): "side_spin_rpm",
+    ("SIDE", "DEG"): "side_angle_deg",
+    ("OFFLINE", "YD"): "offline_yd",
+    ("CARRY", "YD"): "carry_yd",
+    ("ROLL", "YD"): "roll_yd",
+    ("TOTAL", "YD"): "total_yd",
+    ("FLIGHT", "SEC"): "flight_sec",
+    ("DSCNT", "DEG"): "descent_deg",
+    ("HEIGHT", "YD"): "height_yd",
+    ("CLUB SPEED", "MPH"): "club_speed_mph",
+    ("SMASH", "FACTOR"): "smash_factor",
+    ("PATH", "DEG"): "path_deg",
+    ("FTP", "DEG"): "face_to_path_deg",   # face-to-path; current exports only
+    ("FTT", "DEG"): "face_to_target_deg",
+}
+
+# Fields read as integers; everything else in _COLUMN_MAP is a float, except
+# `hand`, which stays a string.
+_INT_FIELDS = frozenset({"shot_score", "back_spin_rpm", "side_spin_rpm"})
+
+
+def _column_index(names: list[str], units: list[str]) -> dict[str, int]:
+    """Map each known metric field to its column index in this file.
+
+    Columns we don't recognize are ignored rather than fatal, so a future
+    SkyTrak addition costs us that one metric instead of the whole file.
+    """
+    index: dict[str, int] = {}
+    for i, raw_name in enumerate(names):
+        name = " ".join((raw_name or "").split()).upper()
+        unit = " ".join((units[i] if i < len(units) else "").split()).upper()
+        field_name = _COLUMN_MAP.get((name, unit))
+        if field_name is not None and field_name not in index:
+            index[field_name] = i
+    return index
 
 
 @dataclass
@@ -91,7 +171,16 @@ class ShotRecord:
     club_speed_mph: float | None
     smash_factor: float | None
     path_deg: float | None
+    face_to_path_deg: float | None
     face_to_target_deg: float | None
+
+
+# Every ShotRecord field filled from a mapped column (i.e. all but the two the
+# block structure supplies: club_code and shot_number).
+_METRIC_FIELDS: tuple[str, ...] = tuple(
+    f.name for f in dataclasses.fields(ShotRecord)
+    if f.name not in ("club_code", "shot_number")
+)
 
 
 @dataclass
@@ -131,7 +220,9 @@ def _to_float(s: str) -> float | None:
 
 
 def _parse_practice_date(value: str) -> datetime:
-    value = value.strip()
+    # Current exports separate date and time with a bullet ("07/09/2026 • 01:40 PM");
+    # drop it and collapse the whitespace so one format list covers both generations.
+    value = " ".join(value.replace("•", " ").split())
     for fmt in _DATE_FORMATS:
         try:
             return datetime.strptime(value, fmt)
@@ -178,8 +269,9 @@ def parse_file(path: str | Path) -> ParsedFile:
 
     for i, row in enumerate(rows[:10]):
         joined = ",".join(row)
-        if PRACTICE_TOKEN in joined:
-            after = joined.split(PRACTICE_TOKEN, 1)[1].strip().strip(",").strip()
+        practice = PRACTICE_RE.search(joined)
+        if practice:
+            after = joined[practice.end():].strip().strip(",").strip()
             session_ts = _parse_practice_date(after)
         elif PLAYER_TOKEN in joined:
             after = joined.split(PLAYER_TOKEN, 1)[1].strip().strip(",").strip()
@@ -192,6 +284,11 @@ def parse_file(path: str | Path) -> ParsedFile:
         raise ValueError(f"{path.name}: missing PRACTICE date header")
     if header_idx is None:
         raise ValueError(f"{path.name}: missing SHOT column header row")
+
+    units_row = rows[header_idx + 1] if len(rows) > header_idx + 1 else []
+    columns = _column_index(rows[header_idx], units_row)
+    if "carry_yd" not in columns:
+        raise ValueError(f"{path.name}: column header has no recognizable CARRY column")
 
     data_start = header_idx + 2
 
@@ -234,28 +331,22 @@ def parse_file(path: str | Path) -> ParsedFile:
                 f"{path.name}: shot row #{shot_num} found before any club delimiter"
             )
 
+        values: dict[str, object] = {}
+        for field_name, col in columns.items():
+            cell = row[col] if col < len(row) else ""
+            if field_name == "hand":
+                values[field_name] = (cell or "").strip() or None
+            elif field_name in _INT_FIELDS:
+                values[field_name] = _to_int(cell)
+            else:
+                values[field_name] = _to_float(cell)
+
         shots.append(
             ShotRecord(
                 club_code=current_club,
                 shot_number=shot_num,
-                hand=(row[1].strip() if len(row) > 1 else None) or None,
-                shot_score=_to_int(row[2]) if len(row) > 2 else None,
-                ball_speed_mph=_to_float(row[3]) if len(row) > 3 else None,
-                launch_deg=_to_float(row[4]) if len(row) > 4 else None,
-                back_spin_rpm=_to_int(row[5]) if len(row) > 5 else None,
-                side_spin_rpm=_to_int(row[6]) if len(row) > 6 else None,
-                side_angle_deg=_to_float(row[7]) if len(row) > 7 else None,
-                offline_yd=_to_float(row[8]) if len(row) > 8 else None,
-                carry_yd=_to_float(row[9]) if len(row) > 9 else None,
-                roll_yd=_to_float(row[10]) if len(row) > 10 else None,
-                total_yd=_to_float(row[11]) if len(row) > 11 else None,
-                flight_sec=_to_float(row[12]) if len(row) > 12 else None,
-                descent_deg=_to_float(row[13]) if len(row) > 13 else None,
-                height_yd=_to_float(row[14]) if len(row) > 14 else None,
-                club_speed_mph=_to_float(row[15]) if len(row) > 15 else None,
-                smash_factor=_to_float(row[16]) if len(row) > 16 else None,
-                path_deg=_to_float(row[17]) if len(row) > 17 else None,
-                face_to_target_deg=_to_float(row[18]) if len(row) > 18 else None,
+                # Metrics absent from this file's header stay None.
+                **{f: values.get(f) for f in _METRIC_FIELDS},
             )
         )
 

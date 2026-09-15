@@ -7,8 +7,10 @@ from src.parser import _normalize_club_code, parse_file
 
 
 FIXTURE = Path(__file__).parent / "fixtures" / "multi_club_sample.csv"
+ACTIVITY_FIXTURE = Path(__file__).parent / "fixtures" / "activity_sample.csv"
 REAL_PW = Path("C:/Users/brand/OneDrive/Documents/swing_stats/Export_ShotsHistory_06082026_123337.csv")
 REAL_MULTI = Path("C:/Users/brand/OneDrive/Documents/swing_stats/Export_ShotsHistory_06092026_134151.csv")
+REAL_EXPECTED_DIST = Path("C:/Users/brand/OneDrive/Documents/swing_stats/Export_ShotsHistory_06182026_141014.csv")
 
 
 def test_multi_club_session_meta():
@@ -67,6 +69,15 @@ def test_negative_offline_is_left():
         ("DRIVER", "D"),
         ("PITCHING WEDGE", "PW"),
         ("gap wedge", "GW"),  # case-insensitive
+        # Wedges labelled by loft rather than code -> the wedge that carries
+        # that loft in this bag, instead of auto-registering a new club.
+        ("56°", "SW"),
+        ("56° ", "SW"),   # trailing space, as SkyTrak writes it
+        ("60°", "LW"),
+        ("60", "LW"),      # degree sign optional; no club code is purely numeric
+        ("52 DEG", "GW"),
+        ("48", "PW"),
+        ("99°", "99°"),  # not a loft we know -> left alone for auto-register
     ],
 )
 def test_normalize_club_code(label, expected):
@@ -96,3 +107,63 @@ def test_real_pw_export():
     carries = [s.carry_yd for s in pw_shots if s.carry_yd is not None]
     avg_carry = sum(carries) / len(carries)
     assert 128 <= avg_carry <= 130
+
+
+# --- current-generation exports (activity-*.csv) -----------------------------
+# Quoted cells, ragged rows, a bullet between date and time, a qualified
+# PRACTICE label, and an extra FTP column inserted before FTT.
+
+
+def test_activity_session_meta():
+    result = parse_file(ACTIVITY_FIXTURE)
+    # "PRACTICE GREENS:" is still a practice session, and the bullet separator
+    # between date and time must not defeat the date parse.
+    assert result.session.session_ts == datetime(2026, 8, 23, 16, 30)
+    assert result.session.player_name is None
+    assert result.session.clubs_seen == ["9I", "LW"]
+    assert len(result.shots) == 3
+
+
+def test_activity_ftp_column_does_not_shift_ftt():
+    """The inserted FTP column must land in face_to_path_deg, not push the
+    face-to-target reading one column out of place."""
+    result = parse_file(ACTIVITY_FIXTURE)
+    first = next(s for s in result.shots if s.club_code == "9I" and s.shot_number == 1)
+    assert first.path_deg == 5.4
+    assert first.face_to_path_deg == 2.9
+    assert first.face_to_target_deg == 8.3
+    assert first.carry_yd == 149.0
+    assert first.total_yd == 149.0
+    assert first.smash_factor == 1.38
+    assert first.back_spin_rpm == 5411
+    assert first.side_spin_rpm == 647
+    assert first.side_angle_deg == 7.7
+
+
+def test_activity_avg_rows_skipped_and_negatives_kept():
+    result = parse_file(ACTIVITY_FIXTURE)
+    assert [s.shot_number for s in result.shots if s.club_code == "9I"] == [1, 2]
+    lw = next(s for s in result.shots if s.club_code == "LW")
+    assert lw.offline_yd == -4.0
+
+
+def test_legacy_export_has_no_face_to_path():
+    """Legacy files carry no FTP column; the field stays None rather than
+    borrowing a neighbouring column's value."""
+    result = parse_file(FIXTURE)
+    assert all(s.face_to_path_deg is None for s in result.shots)
+    first = next(s for s in result.shots if s.club_code == "PW" and s.shot_number == 1)
+    assert first.path_deg == 5.2
+    assert first.face_to_target_deg == 3.0
+
+
+@pytest.mark.skipif(not REAL_EXPECTED_DIST.exists(), reason="real export file not present")
+def test_expected_dist_header_variant_maps_to_shot_score():
+    """Some legacy exports relabel the score column `EXPECTED DIST.`; it is the
+    same column and must not shift every metric after it."""
+    result = parse_file(REAL_EXPECTED_DIST)
+    first = next(s for s in result.shots if s.club_code == "8I" and s.shot_number == 1)
+    assert first.shot_score == 84
+    assert first.ball_speed_mph == 110.0
+    assert first.carry_yd == 157.0
+    assert first.face_to_target_deg == 5.7

@@ -38,6 +38,7 @@ CREATE TABLE IF NOT EXISTS shots (
     club_speed_mph     NUMERIC(5,1),
     smash_factor       NUMERIC(4,2),
     path_deg           NUMERIC(4,1),
+    face_to_path_deg   NUMERIC(4,1),
     face_to_target_deg NUMERIC(4,1),
     UNIQUE (session_id, club_code, shot_number)
 );

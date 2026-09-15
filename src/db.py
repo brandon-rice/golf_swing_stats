@@ -46,5 +46,6 @@ SHOT_INSERT_COLS = (
     "club_speed_mph",
     "smash_factor",
     "path_deg",
+    "face_to_path_deg",
     "face_to_target_deg",
 )
