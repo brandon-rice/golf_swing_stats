@@ -23,6 +23,8 @@ from . import config, db
 # Base font size for the Plotly figures so chart text reads well on the
 # dashboard (axis titles/ticks bump up from this).
 CHART_FONT_SIZE = 15
+# Month labels on the date x-axes read a notch larger than other chart text.
+DATE_TICK_FONT_SIZE = 19
 
 # (column, label) in report order. The first 8 are the user's preferred order;
 # the remainder follow in any order. Decimals chosen per metric below.
@@ -280,24 +282,26 @@ def build_chart(
     return fig
 
 
-def _session_date_ticks(fig: go.Figure, session_ts: pd.Series) -> None:
-    """Put one x-axis tick on each session date, labelled like ``Sep 14``.
+def _month_ticks(fig: go.Figure, session_ts: pd.Series) -> None:
+    """Monthly x-axis: a tick at each month boundary, labelled ``Jun 2026``.
 
-    The year is added under the first label and wherever it changes. Several
-    sessions on one calendar day share a single tick (at the day's first
-    session) so dates never repeat.
+    Labels sit centred under their month and points stay at their actual
+    dates. The range is widened to whole months so the first and last labels
+    aren't clipped.
     """
-    ts = pd.to_datetime(session_ts).sort_values()
-    firsts = ts.groupby(ts.dt.date).first()
-    tickvals, ticktext, prev_year = [], [], None
-    for t in firsts:
-        label = t.strftime("%b ") + str(t.day)
-        if t.year != prev_year:
-            label += f"<br>{t.year}"
-            prev_year = t.year
-        tickvals.append(t)
-        ticktext.append(label)
-    fig.update_xaxes(type="date", tickmode="array", tickvals=tickvals, ticktext=ticktext)
+    fig.update_xaxes(
+        type="date",
+        dtick="M1",
+        tickformat="%b %Y",
+        ticklabelmode="period",
+        tickfont=dict(size=DATE_TICK_FONT_SIZE),
+    )
+    ts = pd.to_datetime(session_ts).dropna()
+    if ts.empty:
+        return
+    start = ts.min().to_period("M").to_timestamp()
+    end = (ts.max().to_period("M") + 1).to_timestamp()
+    fig.update_xaxes(range=[start, end])
 
 
 def build_session_trend(
@@ -344,7 +348,7 @@ def build_session_trend(
         template="plotly_white",
         font=dict(size=CHART_FONT_SIZE),
     )
-    _session_date_ticks(fig, g["session_ts"])
+    _month_ticks(fig, g["session_ts"])
     return fig
 
 
@@ -367,7 +371,7 @@ def build_shots_per_session(sessions: pd.DataFrame) -> go.Figure:
         template="plotly_white",
         font=dict(size=CHART_FONT_SIZE),
     )
-    _session_date_ticks(fig, g["session_ts"])
+    _month_ticks(fig, g["session_ts"])
     return fig
 
 
@@ -401,7 +405,7 @@ def build_clubs_trend(trend: pd.DataFrame, label: str = "value") -> go.Figure:
         legend_title="Club",
         font=dict(size=CHART_FONT_SIZE),
     )
-    _session_date_ticks(fig, pd.Series(trend.index))
+    _month_ticks(fig, pd.Series(trend.index))
     return fig
 
 
