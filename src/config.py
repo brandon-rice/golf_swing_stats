@@ -63,8 +63,43 @@ def neon_db_url() -> str:
     return url
 
 
+def swing_data_dirs() -> list[Path]:
+    """Every folder to scan for SkyTrak exports, in configured order.
+
+    ``SWING_DATA_DIRS`` holds one or more paths separated by ``os.pathsep``
+    (``;`` on Windows, ``:`` elsewhere) or newlines; ``SWING_DATA_DIR`` remains
+    supported as a single-folder alias. Both may be set — the singular is
+    appended if it names a folder the plural didn't already list. Duplicates are
+    dropped so a file is never offered to the ingester twice.
+    """
+    raw_multi = get("SWING_DATA_DIRS") or ""
+    parts = [
+        piece.strip().strip('"')
+        for chunk in raw_multi.splitlines()
+        for piece in chunk.split(os.pathsep)
+    ]
+    single = (get("SWING_DATA_DIR") or "").strip().strip('"')
+    if single:
+        parts.append(single)
+
+    dirs: list[Path] = []
+    seen: set[str] = set()
+    for part in parts:
+        if not part:
+            continue
+        path = Path(part)
+        key = str(path.resolve()).casefold()
+        if key not in seen:
+            seen.add(key)
+            dirs.append(path)
+
+    if not dirs:
+        raise RuntimeError(
+            "No data folders configured: set SWING_DATA_DIRS (or SWING_DATA_DIR) in .env"
+        )
+    return dirs
+
+
 def swing_data_dir() -> Path:
-    raw = get("SWING_DATA_DIR")
-    if not raw:
-        raise RuntimeError("SWING_DATA_DIR not set (check .env)")
-    return Path(raw)
+    """The first configured data folder (back-compat for single-folder callers)."""
+    return swing_data_dirs()[0]

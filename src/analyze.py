@@ -45,6 +45,7 @@ METRICS: list[tuple[str, str]] = [
     ("descent_deg", "Descent (deg)"),
     ("flight_sec", "Flight (sec)"),
     ("shot_score", "Shot score"),
+    ("face_to_path_deg", "Face-to-path (deg)"),
 ]
 
 # Decimal places per metric; default is 1.

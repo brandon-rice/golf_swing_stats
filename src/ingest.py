@@ -2,7 +2,9 @@
 
 Responsibilities:
 - Apply schema + club seed (idempotent) on demand.
-- Ingest a single file or a directory of CSVs.
+- Ingest a single file, a folder of CSVs, or every folder configured in
+  ``SWING_DATA_DIRS`` — SkyTrak's old and new export folders are scanned in
+  one pass and either export format is accepted.
 - Deduplicate by ``sessions.file_hash`` so re-running is safe.
 - Auto-register any club code we see that isn't already seeded, so a new
   club abbreviation never hard-fails the FK on ``shots.club_code``.
@@ -14,6 +16,7 @@ from __future__ import annotations
 
 import argparse
 import dataclasses
+from collections.abc import Iterable
 from pathlib import Path
 
 from sqlalchemy import text
@@ -23,7 +26,12 @@ from . import config, db
 from .parser import ParsedFile, parse_file
 
 SQL_DIR = config.PROJECT_ROOT / "sql"
-SCHEMA_FILES = ("001_schema.sql", "002_seed_clubs.sql")
+SCHEMA_FILES = (
+    "001_schema.sql",
+    "002_seed_clubs.sql",
+    "003_add_face_to_path.sql",
+    "004_merge_loft_labeled_wedges.sql",
+)
 
 
 @dataclasses.dataclass
@@ -122,10 +130,32 @@ def ingest_file(path: str | Path, engine: Engine) -> IngestResult:
         return IngestResult(path, "error", message=f"db: {ex}")
 
 
+def csv_files(directory: str | Path) -> list[Path]:
+    """CSVs in ``directory``, name-sorted. Both export generations live side by
+    side, so we match every ``*.csv`` and let the parser sort out the format."""
+    return sorted(Path(directory).glob("*.csv"))
+
+
 def ingest_dir(directory: str | Path, engine: Engine) -> list[IngestResult]:
-    directory = Path(directory)
-    files = sorted(directory.glob("*.csv"))
-    return [ingest_file(p, engine) for p in files]
+    return [ingest_file(p, engine) for p in csv_files(directory)]
+
+
+def ingest_dirs(directories: Iterable[str | Path], engine: Engine) -> list[IngestResult]:
+    """Ingest every CSV across several folders, in the order given.
+
+    A folder that doesn't exist is reported as one error and the remaining
+    folders are still scanned — a disconnected OneDrive shouldn't stop the
+    local exports from loading. Files duplicated across folders are caught by
+    the usual ``file_hash`` check, so overlapping folders are harmless.
+    """
+    results: list[IngestResult] = []
+    for directory in directories:
+        directory = Path(directory)
+        if not directory.is_dir():
+            results.append(IngestResult(directory, "error", message="folder not found"))
+            continue
+        results.extend(ingest_dir(directory, engine))
+    return results
 
 
 def _format(result: IngestResult) -> str:
@@ -144,33 +174,68 @@ def _format(result: IngestResult) -> str:
     return f"{tag} {result.path.name:40} {detail}"
 
 
+def _ingest_target(target: Path, engine: Engine) -> list[IngestResult]:
+    """Ingest one CLI target — a folder of CSVs, a single CSV, or a bad path."""
+    if target.is_dir():
+        files = csv_files(target)
+        print(f"\n{target}  ({len(files)} csv file(s))")
+        return [ingest_file(f, engine) for f in files]
+    print(f"\n{target.parent}")
+    if not target.exists():
+        return [IngestResult(target, "error", message="path not found")]
+    return [ingest_file(target, engine)]
+
+
 def main(argv: list[str] | None = None) -> int:
-    ap = argparse.ArgumentParser(description="Ingest SkyTrak CSV exports into local Postgres.")
+    ap = argparse.ArgumentParser(
+        description="Ingest SkyTrak CSV exports into local Postgres.",
+    )
     ap.add_argument(
-        "path", nargs="?", default=None,
-        help="CSV file or directory (default: SWING_DATA_DIR from config).",
+        "paths", nargs="*",
+        help="CSV files and/or folders to scan "
+             "(default: every folder in SWING_DATA_DIRS / SWING_DATA_DIR).",
     )
     ap.add_argument("--init", action="store_true", help="Apply schema + seed before ingesting.")
+    ap.add_argument(
+        "--list", action="store_true", dest="list_only",
+        help="List the folders and files that would be scanned, then exit.",
+    )
     args = ap.parse_args(argv)
+
+    targets = [Path(p) for p in args.paths] if args.paths else config.swing_data_dirs()
+
+    if args.list_only:
+        for target in targets:
+            if target.is_dir():
+                files = csv_files(target)
+                print(f"{target}  ({len(files)} csv file(s))")
+                for f in files:
+                    print(f"    {f.name}")
+            else:
+                mark = "" if target.exists() else "   [missing]"
+                print(f"{target}{mark}")
+        return 0
 
     engine = db.local_engine()
     if args.init:
         init_schema(engine)
         print("schema applied")
 
-    target = Path(args.path) if args.path else config.swing_data_dir()
-    if target.is_dir():
-        results = ingest_dir(target, engine)
-    else:
-        results = [ingest_file(target, engine)]
-
-    for r in results:
-        print(_format(r))
+    results: list[IngestResult] = []
+    for target in targets:
+        batch = _ingest_target(target, engine)
+        for r in batch:
+            print("  " + _format(r))
+        results.extend(batch)
 
     inserted = sum(1 for r in results if r.status == "inserted")
+    skipped = sum(1 for r in results if r.status == "skipped_duplicate")
     shots = sum(r.shots_inserted for r in results)
     errors = sum(1 for r in results if r.status == "error")
-    print(f"\n{inserted} session(s) inserted, {shots} shot(s), {errors} error(s).")
+    print(
+        f"\n{len(targets)} folder(s)/file(s) scanned: {inserted} session(s) inserted, "
+        f"{shots} shot(s), {skipped} already loaded, {errors} error(s)."
+    )
     return 1 if errors else 0
 
 

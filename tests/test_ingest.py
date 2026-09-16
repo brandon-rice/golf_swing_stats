@@ -12,6 +12,7 @@ from sqlalchemy import text
 from src import db, ingest
 
 FIXTURE = Path(__file__).parent / "fixtures" / "multi_club_sample.csv"
+ACTIVITY_FIXTURE = Path(__file__).parent / "fixtures" / "activity_sample.csv"
 
 
 def _local_engine_or_skip():
@@ -32,9 +33,10 @@ def engine():
     # Remove anything this test inserted, keyed by the fixture's file_hash.
     from src.parser import parse_file
 
-    file_hash = parse_file(FIXTURE).session.file_hash
+    hashes = [parse_file(f).session.file_hash for f in (FIXTURE, ACTIVITY_FIXTURE)]
     with eng.begin() as conn:
-        conn.execute(text("DELETE FROM sessions WHERE file_hash = :h"), {"h": file_hash})
+        for file_hash in hashes:
+            conn.execute(text("DELETE FROM sessions WHERE file_hash = :h"), {"h": file_hash})
 
 
 def test_ingest_inserts_session_and_shots(engine):
@@ -69,3 +71,43 @@ def test_ingest_registers_unseen_club(engine):
                 text("SELECT 1 FROM clubs WHERE club_code = :c"), {"c": code}
             ).scalar()
             assert exists == 1
+
+
+def test_ingest_dirs_scans_every_folder(engine, tmp_path):
+    """Both export generations load in one pass, each from its own folder."""
+    old_dir, new_dir = tmp_path / "old", tmp_path / "new"
+    old_dir.mkdir()
+    new_dir.mkdir()
+    (old_dir / FIXTURE.name).write_bytes(FIXTURE.read_bytes())
+    (new_dir / ACTIVITY_FIXTURE.name).write_bytes(ACTIVITY_FIXTURE.read_bytes())
+
+    results = ingest.ingest_dirs([old_dir, new_dir], engine)
+    assert [r.status for r in results] == ["inserted", "inserted"]
+    assert {r.path.name for r in results} == {FIXTURE.name, ACTIVITY_FIXTURE.name}
+
+
+def test_ingest_dirs_reports_missing_folder_and_keeps_going(engine, tmp_path):
+    """A folder that isn't there (unmounted drive, un-synced OneDrive) is one
+    error, not an abort — the folders that do exist still load."""
+    good = tmp_path / "good"
+    good.mkdir()
+    (good / FIXTURE.name).write_bytes(FIXTURE.read_bytes())
+
+    results = ingest.ingest_dirs([tmp_path / "nope", good], engine)
+    assert results[0].status == "error"
+    assert "folder not found" in (results[0].message or "")
+    assert results[1].status == "inserted"
+
+
+def test_new_format_face_to_path_reaches_the_database(engine):
+    result = ingest.ingest_file(ACTIVITY_FIXTURE, engine)
+    assert result.status == "inserted"
+    with engine.connect() as conn:
+        row = conn.execute(
+            text(
+                "SELECT path_deg, face_to_path_deg, face_to_target_deg FROM shots "
+                "WHERE session_id = :s AND club_code = '9I' AND shot_number = 1"
+            ),
+            {"s": result.session_id},
+        ).first()
+    assert [float(v) for v in row] == [5.4, 2.9, 8.3]
