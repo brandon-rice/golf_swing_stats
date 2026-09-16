@@ -280,6 +280,26 @@ def build_chart(
     return fig
 
 
+def _session_date_ticks(fig: go.Figure, session_ts: pd.Series) -> None:
+    """Put one x-axis tick on each session date, labelled like ``Sep 14``.
+
+    The year is added under the first label and wherever it changes. Several
+    sessions on one calendar day share a single tick (at the day's first
+    session) so dates never repeat.
+    """
+    ts = pd.to_datetime(session_ts).sort_values()
+    firsts = ts.groupby(ts.dt.date).first()
+    tickvals, ticktext, prev_year = [], [], None
+    for t in firsts:
+        label = t.strftime("%b ") + str(t.day)
+        if t.year != prev_year:
+            label += f"<br>{t.year}"
+            prev_year = t.year
+        tickvals.append(t)
+        ticktext.append(label)
+    fig.update_xaxes(type="date", tickmode="array", tickvals=tickvals, ticktext=ticktext)
+
+
 def build_session_trend(
     df_club: pd.DataFrame,
     distance_col: str = "total_yd",
@@ -312,7 +332,7 @@ def build_session_trend(
                 marker=dict(size=9),
                 line=dict(width=2),
                 hovertemplate=(
-                    "%{x|%Y-%m-%d}<br>mean %{y:.1f} yd"
+                    "%{x|%b %-d, %Y}<br>mean %{y:.1f} yd"
                     "<br>σ %{error_y.array:.1f} yd<extra></extra>"
                 ),
             )
@@ -324,8 +344,7 @@ def build_session_trend(
         template="plotly_white",
         font=dict(size=CHART_FONT_SIZE),
     )
-    # Show calendar dates on the x-axis rather than date-and-time.
-    fig.update_xaxes(type="date", tickformat="%Y-%m-%d")
+    _session_date_ticks(fig, g["session_ts"])
     return fig
 
 
@@ -339,7 +358,7 @@ def build_shots_per_session(sessions: pd.DataFrame) -> go.Figure:
         go.Bar(
             x=g["session_ts"],
             y=g["shots"],
-            hovertemplate="%{x|%Y-%m-%d}<br>%{y} shots<extra></extra>",
+            hovertemplate="%{x|%b %-d, %Y}<br>%{y} shots<extra></extra>",
         )
     )
     fig.update_layout(
@@ -348,7 +367,7 @@ def build_shots_per_session(sessions: pd.DataFrame) -> go.Figure:
         template="plotly_white",
         font=dict(size=CHART_FONT_SIZE),
     )
-    fig.update_xaxes(type="date", tickformat="%Y-%m-%d")
+    _session_date_ticks(fig, g["session_ts"])
     return fig
 
 
@@ -372,7 +391,7 @@ def build_clubs_trend(trend: pd.DataFrame, label: str = "value") -> go.Figure:
                 connectgaps=False,
                 marker=dict(size=8, color=palette[i % len(palette)]),
                 line=dict(width=2, color=palette[i % len(palette)]),
-                hovertemplate=f"{code}<br>%{{x|%Y-%m-%d}}<br>%{{y:.1f}}<extra></extra>",
+                hovertemplate=f"{code}<br>%{{x|%b %-d, %Y}}<br>%{{y:.1f}}<extra></extra>",
             )
         )
     fig.update_layout(
@@ -382,7 +401,7 @@ def build_clubs_trend(trend: pd.DataFrame, label: str = "value") -> go.Figure:
         legend_title="Club",
         font=dict(size=CHART_FONT_SIZE),
     )
-    fig.update_xaxes(type="date", tickformat="%Y-%m-%d")
+    _session_date_ticks(fig, pd.Series(trend.index))
     return fig
 
 

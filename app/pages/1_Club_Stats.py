@@ -27,7 +27,11 @@ names = dict(zip(view["club_code"], view["club_name"]))
 
 # --- Summary: every stat per club ------------------------------------------
 st.subheader("Averages by club")
-st.dataframe(data.club_averages(view, extended=True), use_container_width=True)
+st.dataframe(
+    data.club_averages(view, extended=True),
+    use_container_width=True,
+    height="content",
+)
 st.caption(
     "Distances are means; Total σ / Offline σ are sample std devs and 67% / 95% "
     "are the mean ± 1σ / ± 2σ total-yardage bands. Detail view below has every "

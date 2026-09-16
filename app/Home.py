@@ -41,7 +41,11 @@ c4.markdown(
 
 # --- Averages by club ------------------------------------------------------
 st.subheader("Averages by club")
-st.dataframe(data.club_averages(view, show_95=False), use_container_width=True)
+st.dataframe(
+    data.club_averages(view, show_95=False),
+    use_container_width=True,
+    height="content",
+)
 st.caption("Distances are means; 67% is the mean ± 1σ of total yardage.")
 
 # --- Dispersion chart ------------------------------------------------------
