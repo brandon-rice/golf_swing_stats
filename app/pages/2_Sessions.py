@@ -37,7 +37,7 @@ st.dataframe(
     hide_index=True,
     column_config={
         "session_id": st.column_config.NumberColumn("ID", format="%d"),
-        "session_ts": st.column_config.DatetimeColumn("When", format="YYYY-MM-DD HH:mm"),
+        "session_ts": st.column_config.DateColumn("Date", format="YYYY-MM-DD"),
         "published": st.column_config.CheckboxColumn("On Neon"),
     },
 )
@@ -51,6 +51,8 @@ st.subheader("Trend across sessions")
 shots = data.load_shots(source)
 if shots.empty:
     st.stop()
+
+shots = data.outlier_sidebar(shots)
 
 metric_label = {label: col for col, label in data.METRICS}
 col1, col2 = st.columns([1, 3])

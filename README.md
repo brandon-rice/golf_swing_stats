@@ -143,11 +143,20 @@ streamlit run app/Home.py
 It opens at <http://localhost:8501> with three pages:
 
 - **Overview** — KPI summary plus the interactive dispersion chart (toggle total/carry
-  distance and the 1σ/2σ ellipses), filterable by session and club.
+  distance and the 1σ/2σ ellipses), filterable by date and club. The sidebar date filter
+  offers presets (All / Last 1 / Last 5 / 30 days) plus a custom start–end range, with a
+  "Pick specific dates" expander for cherry-picking non-contiguous sessions.
 - **Club Stats** — per-club averages table, a single-club mean/std detail with side tendency,
   and the full text report as a download.
 - **Sessions** — the list of ingested sessions (with a "published to Neon" flag) and a
   per-club trend of any metric across sessions over time.
+
+An **Exclude mishits** toggle in the sidebar drops shots that aren't representative: physical
+gates catch non-swings (club speed under 60% of the club's median, or a topped shot that was
+mostly roll), and a robust MAD test catches strikes far below the club's normal distance
+(modified z < −3.5, skipped for clubs with fewer than 12 shots). Offline yardage is never
+filtered — dispersion is what the chart exists to show. Filtering happens at query time only;
+**nothing is deleted from Postgres**, and the excluded shots are listed in the sidebar.
 
 A **Data source** picker in the sidebar switches between the local Postgres and the Neon
 cloud mirror (only targets that are configured are offered). The app reuses the same

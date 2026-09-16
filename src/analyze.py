@@ -261,10 +261,21 @@ def build_chart(
         template="plotly_white",
         legend_title="Club",
         font=dict(size=CHART_FONT_SIZE),
+        # Equal aspect (below) makes the plot area as tall as it is wide in
+        # yards, so a taller figure is needed to keep it a usable size.
+        height=720,
     )
-    fig.update_xaxes(range=[-(max_abs_x + pad), max_abs_x + pad], zeroline=False)
-    # Lock equal aspect so lateral spread isn't visually exaggerated.
-    fig.update_yaxes(scaleanchor="x", scaleratio=1)
+    # Lock equal aspect so lateral spread isn't visually exaggerated, and keep
+    # the offline range honest while doing it. ``constrain="domain"`` is what
+    # makes the two compatible: without it Plotly satisfies the equal-scale
+    # constraint by widening the x *range* (a wide, short plot area would stretch
+    # offline out past ±200 yd), instead of by shrinking the plot area to fit.
+    fig.update_xaxes(
+        range=[-(max_abs_x + pad), max_abs_x + pad],
+        zeroline=False,
+        constrain="domain",
+    )
+    fig.update_yaxes(scaleanchor="x", scaleratio=1, constrain="domain")
     return fig
 
 

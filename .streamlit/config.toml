@@ -1,3 +1,8 @@
+[server]
+# Rerun automatically when a source file changes. Without this, edits to the
+# imported modules (app/data.py) stay stale in a running server until restart.
+runOnSave = true
+
 [theme]
 # Bump the whole app up from the 16px default so tables and labels are easier
 # to read. This scales body text, widgets, and the dataframe grid.
